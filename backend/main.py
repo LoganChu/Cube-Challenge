@@ -58,8 +58,35 @@ class User(Base):
     city = Column(String, nullable=True)
     state_province = Column(String, nullable=True)
     country = Column(String, nullable=True)
+    # Subscription
+    subscription_tier = Column(String, default="free")  # "free", "pro", "premium"
     
     inventory = relationship("InventoryEntry", back_populates="user")
+
+# Subscription tier limits
+SUBSCRIPTION_TIERS = {
+    "free": {
+        "name": "Free",
+        "max_cards": 100,
+        "max_trend_insights": 3,
+        "price": 0,
+        "price_period": "month"
+    },
+    "pro": {
+        "name": "Pro",
+        "max_cards": 1000,
+        "max_trend_insights": 20,
+        "price": 9.99,
+        "price_period": "month"
+    },
+    "premium": {
+        "name": "Premium",
+        "max_cards": 10000,
+        "max_trend_insights": 100,
+        "price": 19.99,
+        "price_period": "month"
+    }
+}
 
 class InventoryEntry(Base):
     __tablename__ = "inventory_entries"
@@ -132,6 +159,8 @@ def _ensure_sqlite_columns():
             cur.execute("ALTER TABLE users ADD COLUMN state_province VARCHAR")
         if "country" not in cols:
             cur.execute("ALTER TABLE users ADD COLUMN country VARCHAR")
+        if "subscription_tier" not in cols:
+            cur.execute("ALTER TABLE users ADD COLUMN subscription_tier VARCHAR DEFAULT 'free'")
         conn.commit()
     finally:
         conn.close()
@@ -421,6 +450,16 @@ async def save_scan_to_inventory(
     if not scan.results:
         raise HTTPException(status_code=400, detail="Scan not completed")
     
+    # Check subscription limits
+    tier_info = SUBSCRIPTION_TIERS.get(current_user.subscription_tier, SUBSCRIPTION_TIERS["free"])
+    current_card_count = db.query(InventoryEntry).filter(InventoryEntry.user_id == current_user.id).count()
+    
+    if current_card_count + len(card_ids) > tier_info["max_cards"]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Card limit reached. Your {tier_info['name']} plan allows {tier_info['max_cards']} cards. You currently have {current_card_count} cards. Please upgrade to add more."
+        )
+    
     import json
     results = json.loads(scan.results)
     detected_cards = results.get("detected_cards", [])
@@ -430,6 +469,10 @@ async def save_scan_to_inventory(
     
     for card_data in detected_cards:
         if card_data.get("id") in card_ids:
+            # Check limit before each save
+            if current_card_count + saved_count >= tier_info["max_cards"]:
+                break
+            
             entry = InventoryEntry(
                 user_id=current_user.id,
                 card_name=card_data.get("name", ""),
@@ -449,7 +492,9 @@ async def save_scan_to_inventory(
         "success": True,
         "data": {
             "saved_count": saved_count,
-            "inventory_entries": [{"id": e.id, "card_name": e.card_name} for e in inventory_entries]
+            "inventory_entries": [{"id": e.id, "card_name": e.card_name} for e in inventory_entries],
+            "card_limit": tier_info["max_cards"],
+            "current_count": current_card_count + saved_count
         }
     }
 
@@ -546,8 +591,10 @@ async def get_matches(current_user: User = Depends(get_current_user), db: Sessio
 # Notifications
 @app.get("/api/v1/notifications")
 async def list_notifications(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Generate basic trend notifications (MVP mock): top 3 cards by value
-    inv = db.query(InventoryEntry).filter(InventoryEntry.user_id == current_user.id).order_by(InventoryEntry.current_value.desc().nullslast()).limit(3).all()
+    # Generate basic trend notifications (MVP mock): respect subscription tier limits
+    tier_info = SUBSCRIPTION_TIERS.get(current_user.subscription_tier, SUBSCRIPTION_TIERS["free"])
+    max_trends = tier_info["max_trend_insights"]
+    inv = db.query(InventoryEntry).filter(InventoryEntry.user_id == current_user.id).order_by(InventoryEntry.current_value.desc().nullslast()).limit(max_trends).all()
     for item in inv:
         if item.current_value:
             title = "Portfolio trend"
@@ -599,6 +646,8 @@ async def get_settings(current_user: User = Depends(get_current_user)):
     return {
         "success": True,
         "data": {
+            "username": current_user.username,
+            "email": current_user.email,
             "inventory_public": current_user.inventory_public,
             "marketplace_enabled": current_user.marketplace_enabled,
             "notification_in_app": current_user.notification_in_app,
@@ -661,6 +710,63 @@ async def get_dashboard(current_user: User = Depends(get_current_user), db: Sess
             "active_listings": active_listings,
             "pending_trades": pending_trades,
             "unread_alerts": unread_alerts
+        }
+    }
+
+# Subscription
+@app.get("/api/v1/subscription")
+async def get_subscription(current_user: User = Depends(get_current_user)):
+    """Get current subscription tier and limits"""
+    tier_info = SUBSCRIPTION_TIERS.get(current_user.subscription_tier, SUBSCRIPTION_TIERS["free"])
+    return {
+        "success": True,
+        "data": {
+            "tier": current_user.subscription_tier,
+            "tier_name": tier_info["name"],
+            "max_cards": tier_info["max_cards"],
+            "max_trend_insights": tier_info["max_trend_insights"],
+            "price": tier_info["price"],
+            "price_period": tier_info["price_period"]
+        }
+    }
+
+@app.get("/api/v1/subscription/tiers")
+async def get_subscription_tiers():
+    """Get all available subscription tiers"""
+    return {
+        "success": True,
+        "data": [
+            {
+                "tier": tier_key,
+                **tier_info
+            }
+            for tier_key, tier_info in SUBSCRIPTION_TIERS.items()
+        ]
+    }
+
+@app.post("/api/v1/subscription/upgrade")
+async def upgrade_subscription(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upgrade subscription tier (MVP: no payment processing, just update tier)"""
+    new_tier = payload.get("tier")
+    if new_tier not in SUBSCRIPTION_TIERS:
+        raise HTTPException(status_code=400, detail="Invalid subscription tier")
+    
+    # In production, verify payment here before upgrading
+    # For MVP, just update the tier
+    current_user.subscription_tier = new_tier
+    db.commit()
+    
+    tier_info = SUBSCRIPTION_TIERS[new_tier]
+    return {
+        "success": True,
+        "data": {
+            "tier": new_tier,
+            "tier_name": tier_info["name"],
+            "message": f"Successfully upgraded to {tier_info['name']}!"
         }
     }
 

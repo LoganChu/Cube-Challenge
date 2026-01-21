@@ -10,6 +10,7 @@ import InventoryPage from './pages/InventoryPage';
 import MarketplacePage from './pages/MarketplacePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import SubscriptionPage from './pages/SubscriptionPage';
 
 function App() {
   return (
@@ -86,6 +87,16 @@ function App() {
             <ProtectedRoute>
               <AppLayout>
                 <SettingsPage />
+              </AppLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/subscription"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <SubscriptionPage />
               </AppLayout>
             </ProtectedRoute>
           }

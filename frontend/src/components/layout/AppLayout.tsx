@@ -7,7 +7,7 @@ import {
   ShoppingCart, 
   Bell, 
   Settings,
-  User
+  CreditCard
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -28,13 +28,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { path: '/marketplace', icon: ShoppingCart, label: 'Marketplace' },
   ];
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
-    navigate('/login');
-  };
-
   const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
   const token = localStorage.getItem('access_token') || '';
   const [unreadCount, setUnreadCount] = useState(0);
@@ -46,10 +39,24 @@ export default function AppLayout({ children }: AppLayoutProps) {
         const res = await fetch(`${apiUrl}/api/v1/notifications/unread-count`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        
+        // Handle 401 Unauthorized - token expired or invalid
+        if (res.status === 401) {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('user');
+          navigate('/login');
+          return;
+        }
+        
+        if (!res.ok) {
+          console.error('Failed to fetch notifications:', res.status);
+          return;
+        }
+        
         const json = await res.json();
         if (!cancelled) setUnreadCount(json.data?.count || 0);
-      } catch {
-        // ignore
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
       }
     }
     load();
@@ -58,7 +65,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [apiUrl, token]);
+  }, [apiUrl, token, navigate]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -91,8 +98,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 })}
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-700 hidden md:block">{user.username || 'User'}</span>
+            <div className="flex items-center gap-2">
               <button
                 className="relative p-2 text-gray-700 hover:bg-gray-50 rounded-lg"
                 onClick={() => navigate('/notifications')}
@@ -107,16 +113,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
               </button>
               <button
                 className="p-2 text-gray-700 hover:bg-gray-50 rounded-lg"
+                onClick={() => navigate('/subscription')}
+                aria-label="Subscription"
+              >
+                <CreditCard className="w-6 h-6" />
+              </button>
+              <button
+                className="p-2 text-gray-700 hover:bg-gray-50 rounded-lg"
                 onClick={() => navigate('/settings')}
                 aria-label="Settings"
               >
                 <Settings className="w-6 h-6" />
-              </button>
-              <button 
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg border border-gray-300"
-              >
-                Logout
               </button>
             </div>
           </div>

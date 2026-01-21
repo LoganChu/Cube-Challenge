@@ -171,10 +171,9 @@ function ToggleRow({
         aria-label={title}
       >
         <span
-          className={`absolute top-0.5 w-6 h-6 rounded-full bg-white transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}
+          className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white transition-transform ${value ? 'translate-x-5' : 'translate-x-0'}`}
         />
       </button>
     </div>
   );
 }
-
