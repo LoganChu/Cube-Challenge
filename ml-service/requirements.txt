@@ -1,0 +1,8 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+pillow==10.1.0
+# Add actual ML dependencies if using real models:
+# torch==2.1.0
+# ultralytics==8.0.0  # for YOLOv8
+# onnxruntime==1.16.0
