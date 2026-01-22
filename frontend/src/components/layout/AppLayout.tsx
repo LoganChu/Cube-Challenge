@@ -75,7 +75,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-8">
               <Link to="/" className="text-2xl font-bold text-blue-600">
-                CardVault
+                SLAB
               </Link>
               <div className="hidden md:flex gap-6">
                 {navItems.map((item) => {

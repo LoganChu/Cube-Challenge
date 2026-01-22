@@ -71,7 +71,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         {/* Logo/Title */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">CardVault</h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">SLAB</h1>
           <p className="text-gray-600">Your virtual card collection manager</p>
         </div>
 

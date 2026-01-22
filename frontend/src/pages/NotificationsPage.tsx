@@ -85,6 +85,8 @@ export default function NotificationsPage() {
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
   }
 
+  const displayItems = items.length ? items : placeholderNotifications;
+
   return (
     <div className="space-y-6">
       <div>
@@ -97,14 +99,14 @@ export default function NotificationsPage() {
       <div className="bg-white rounded-lg shadow-md p-6">
         {loading ? (
           <div className="py-10 text-center text-gray-600">Loading…</div>
-        ) : items.length === 0 ? (
+        ) : displayItems.length === 0 ? (
           <div className="py-10 text-center text-gray-600">
             <Bell className="w-10 h-10 text-gray-300 mx-auto mb-3" />
             No notifications yet.
           </div>
         ) : (
           <div className="space-y-3">
-            {(items.length ? items : placeholderNotifications).map((n) => (
+            {displayItems.map((n) => (
               <div key={n.id} className={`border rounded-lg p-4 ${n.read ? 'border-gray-200 bg-white' : 'border-blue-200 bg-blue-50'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

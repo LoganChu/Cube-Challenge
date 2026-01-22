@@ -156,7 +156,8 @@ export default function DashboardPage() {
     }
   };
 
-  const displayStats = stats || placeholderStats;
+  const hasRealStats = stats && (stats.total_value > 0 || stats.active_listings > 0 || stats.unread_alerts > 0);
+  const displayStats = hasRealStats ? stats : placeholderStats;
   const displayActivity = marketplaceActivity.length ? marketplaceActivity : placeholderActivity;
 
   if (loading) {
