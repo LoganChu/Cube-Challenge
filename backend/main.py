@@ -110,6 +110,8 @@ def crop_card_image(original_image_path: str, bounding_box: dict, card_id: str) 
         
         # Crop the image
         cropped_img = img.crop((left, top, right, bottom))
+        if cropped_img.mode in ("RGBA", "LA", "P"):
+            cropped_img = cropped_img.convert("RGB")
         
         # Create cropped images directory
         cropped_dir = Path("uploads/cropped")

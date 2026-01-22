@@ -380,35 +380,8 @@ export default function ScanPage() {
                     </h2>
                   </div>
                   <p className="text-green-700">
-                    All detected cards have been automatically saved to your inventory.
+                    Scan complete. {scanResult.detectedCards.length} card{scanResult.detectedCards.length !== 1 ? 's were' : ' was'} added.
                   </p>
-                </div>
-
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Detected Cards ({scanResult.detectedCards.length})
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {scanResult.detectedCards.map((card) => (
-                      <div key={card.id} className="border border-gray-200 rounded-lg p-4">
-                        <img
-                          src={card.cropImageUrl}
-                          alt="Detected card"
-                          className="w-full h-48 object-contain bg-gray-50 rounded-lg mb-3"
-                        />
-                        <div className="space-y-2">
-                          <p className="font-semibold text-gray-900">{card.predictedName || 'Unknown Card'}</p>
-                          <p className="text-sm text-gray-600">Set: {card.predictedSet?.code || 'N/A'}</p>
-                          {card.predictedConfidence && (
-                            <p className="text-xs text-gray-500">
-                              Confidence: {(card.predictedConfidence * 100).toFixed(1)}%
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="flex gap-4">

@@ -72,7 +72,6 @@ export default function InventoryPage() {
   };
 
   const removeEntry = async (entryId: string) => {
-    if (!window.confirm('Remove this card from your inventory?')) return;
     try {
       const response = await fetch(`${apiUrl}/api/v1/inventory/${entryId}`, {
         method: 'DELETE',
