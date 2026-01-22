@@ -5,6 +5,7 @@ FastAPI-based REST API for MVP
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -15,6 +16,7 @@ import jwt
 import bcrypt
 import uuid
 import os
+import json
 from pathlib import Path
 import httpx
 
@@ -43,6 +45,17 @@ security = HTTPBearer()
 # ML Service URL
 ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://cube-challenge-ml-service-1:8001")
 
+
+class Scan(Base):
+    __tablename__ = "scans"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"))
+    image_url = Column(String)
+    scan_type = Column(String)  # "single" or "multi"
+    status = Column(String, default="pending")  # "pending", "processing", "completed", "failed"
+    results = Column(Text, nullable=True)  # JSON string
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Database Models
 class User(Base):
     __tablename__ = "users"
@@ -62,6 +75,149 @@ class User(Base):
     subscription_tier = Column(String, default="free")  # "free", "pro", "premium"
     
     inventory = relationship("InventoryEntry", back_populates="user")
+
+# Image processing
+def crop_card_image(original_image_path: str, bounding_box: dict, card_id: str) -> Optional[str]:
+    """
+    Crop a card from the original scan image based on bounding box coordinates.
+    Bounding box is in normalized coordinates (0.0 to 1.0).
+    Returns the path to the cropped image, or None if cropping fails.
+    """
+    try:
+        from PIL import Image
+        # Open the original image
+        img = Image.open(original_image_path)
+        img_width, img_height = img.size
+        
+        # Extract bounding box coordinates (normalized 0.0-1.0)
+        x = bounding_box.get("x", 0.1)
+        y = bounding_box.get("y", 0.1)
+        width = bounding_box.get("width", 0.8)
+        height = bounding_box.get("height", 0.8)
+        
+        # Convert to pixel coordinates
+        left = int(x * img_width)
+        top = int(y * img_height)
+        right = int((x + width) * img_width)
+        bottom = int((y + height) * img_height)
+        
+        # Ensure coordinates are within image bounds
+        left = max(0, min(left, img_width))
+        top = max(0, min(top, img_height))
+        right = max(left, min(right, img_width))
+        bottom = max(top, min(bottom, img_height))
+        
+        # Crop the image
+        cropped_img = img.crop((left, top, right, bottom))
+        
+        # Create cropped images directory
+        cropped_dir = Path("uploads/cropped")
+        cropped_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save cropped image
+        cropped_path = cropped_dir / f"{card_id}.jpg"
+        cropped_img.save(cropped_path, "JPEG", quality=95)
+        
+        return str(cropped_path)
+    except Exception as e:
+        print(f"Error cropping image: {e}")
+        return None
+
+def save_detected_cards_to_inventory(
+    detected_cards: list,
+    scan: Scan,
+    current_user: User,
+    db: Session
+) -> tuple[int, list]:
+    """
+    Helper function to save detected cards to inventory.
+    Returns (saved_count, inventory_entries)
+    """
+    # Check subscription limits
+    tier_info = SUBSCRIPTION_TIERS.get(current_user.subscription_tier, SUBSCRIPTION_TIERS["free"])
+    current_card_count = db.query(InventoryEntry).filter(InventoryEntry.user_id == current_user.id).count()
+    
+    saved_count = 0
+    inventory_entries = []
+    
+    for card_data in detected_cards:
+        # Check limit before each save
+        if current_card_count + saved_count >= tier_info["max_cards"]:
+            print(f"Card limit reached. Stopping at {saved_count} cards saved.")
+            break
+        
+        # Extract card name and set code
+        card_name = card_data.get("name", "")
+        set_code = card_data.get("set_code", "")
+        
+        # Extract condition information if available
+        condition = "Near Mint"  # Default
+        condition_grade = None
+        condition_details = {}
+        
+        if "condition" in card_data and isinstance(card_data["condition"], dict):
+            # Try to determine condition from condition metrics
+            estimated_grade = card_data["condition"].get("estimated_grade", 0.0)
+            condition_details = {
+                "centering": card_data["condition"].get("centering", 0.0),
+                "corners": card_data["condition"].get("corners", 0.0),
+                "surface": card_data["condition"].get("surface", 0.0),
+                "estimated_grade": estimated_grade
+            }
+            if estimated_grade >= 9.0:
+                condition = "Near Mint"
+            elif estimated_grade >= 7.0:
+                condition = "Lightly Played"
+            elif estimated_grade >= 5.0:
+                condition = "Moderately Played"
+            elif estimated_grade >= 3.0:
+                condition = "Heavily Played"
+            else:
+                condition = "Damaged"
+            condition_grade = float(estimated_grade) if estimated_grade else None
+        
+        # Create entry first to get ID for image filename
+        entry = InventoryEntry(
+            user_id=current_user.id,
+            card_name=card_name,
+            set_code=set_code,
+            quantity=1,
+            condition=condition,
+            condition_grade=condition_grade,
+            current_value=0.0,  # Default, will be updated later
+            scan_image_url=scan.image_url,
+            card_image_url=None,  # Will be set after cropping
+            metadata_json=None  # Will be set after creating entry
+        )
+        db.add(entry)
+        db.flush()  # Flush to get the entry ID
+        
+        # Crop card image from original scan using entry ID
+        card_image_url = None
+        bounding_box = card_data.get("bounding_box", {})
+        if scan.image_url and bounding_box:
+            cropped_path = crop_card_image(scan.image_url, bounding_box, entry.id)
+            if cropped_path:
+                card_image_url = cropped_path
+                entry.card_image_url = card_image_url
+        
+        # Store additional metadata
+        metadata_json = {
+            "card_number": card_data.get("card_number"),
+            "year": card_data.get("year"),
+            "domain": card_data.get("domain", "other"),
+            "confidence": card_data.get("confidence", 0.8),
+            "condition_details": condition_details
+        }
+        entry.metadata_json = json.dumps(metadata_json)
+        
+        inventory_entries.append(entry)
+        saved_count += 1
+    
+    db.commit()
+    return saved_count, inventory_entries
+
+
 
 # Subscription tier limits
 SUBSCRIPTION_TIERS = {
@@ -99,20 +255,13 @@ class InventoryEntry(Base):
     condition_grade = Column(Float, nullable=True)
     current_value = Column(Float, nullable=True)
     scan_image_url = Column(String, nullable=True)
+    card_image_url = Column(String, nullable=True)  # Cropped card image
+    metadata_json = Column(Text, nullable=True)  # JSON string for additional card data
     scanned_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="inventory")
 
-class Scan(Base):
-    __tablename__ = "scans"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"))
-    image_url = Column(String)
-    scan_type = Column(String)  # "single" or "multi"
-    status = Column(String, default="pending")  # "pending", "processing", "completed", "failed"
-    results = Column(Text, nullable=True)  # JSON string
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 # Marketplace Wants
 class Want(Base):
@@ -161,11 +310,25 @@ def _ensure_sqlite_columns():
             cur.execute("ALTER TABLE users ADD COLUMN country VARCHAR")
         if "subscription_tier" not in cols:
             cur.execute("ALTER TABLE users ADD COLUMN subscription_tier VARCHAR DEFAULT 'free'")
+        
+        # Check inventory_entries columns
+        cur.execute("PRAGMA table_info(inventory_entries)")
+        inv_cols = {row[1] for row in cur.fetchall()}
+        if "card_image_url" not in inv_cols:
+            cur.execute("ALTER TABLE inventory_entries ADD COLUMN card_image_url VARCHAR")
+        if "metadata_json" not in inv_cols:
+            cur.execute("ALTER TABLE inventory_entries ADD COLUMN metadata_json TEXT")
+        
         conn.commit()
     finally:
         conn.close()
 
 _ensure_sqlite_columns()
+
+# Mount static files for serving images
+uploads_dir = Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Pydantic Models
 class UserRegister(BaseModel):
@@ -352,11 +515,29 @@ async def upload_scan(
                 if response.status_code == 200:
                     results = response.json()
                     print(f"ML service results: {results}")
-                    print(f"Detected cards count: {len(results.get('detected_cards', []))}")
+                    detected_cards = results.get("detected_cards", [])
+                    print(f"Detected cards count: {len(detected_cards)}")
                     
-                    scan.results = str(results)
+                    # Store results as JSON
+                    scan.results = json.dumps(results)
                     scan.status = "completed"
                     print(f"Scan marked as completed")
+                    
+                    # Automatically save all detected cards to inventory
+                    if detected_cards:
+                        print(f"=== Auto-saving {len(detected_cards)} detected cards to inventory ===")
+                        try:
+                            saved_count, inventory_entries = save_detected_cards_to_inventory(
+                                detected_cards, scan, current_user, db
+                            )
+                            print(f"Successfully saved {saved_count} card(s) to inventory")
+                            for entry in inventory_entries:
+                                print(f"  - {entry.card_name} ({entry.set_code})")
+                        except Exception as e:
+                            print(f"Error auto-saving cards to inventory: {e}")
+                            import traceback
+                            print(traceback.format_exc())
+                            # Don't fail the scan if auto-save fails
                 else:
                     print(f"ML service returned non-200 status: {response.status_code}")
                     print(f"Response body: {response.text}")
@@ -460,22 +641,64 @@ async def get_inventory(
     total = query.count()
     items = query.offset((page - 1) * limit).limit(limit).all()
     
+    # Parse metadata for each item
+    items_data = []
+    for item in items:
+        metadata = {}
+        if item.metadata:
+            try:
+                metadata = json.loads(item.metadata)
+            except:
+                pass
+        
+        # Use cropped card image if available, otherwise fall back to scan image
+        image_url = item.card_image_url or item.scan_image_url or ""
+        # Convert relative path to URL path
+        if image_url and not image_url.startswith("http"):
+            try:
+                uploads_path = Path("uploads").resolve()
+                image_path = Path(image_url).resolve()
+                # Check if the image path is within uploads directory
+                if str(image_path).startswith(str(uploads_path)):
+                    rel_path = str(image_path.relative_to(uploads_path))
+                    # Convert Windows path separators to forward slashes
+                    rel_path = rel_path.replace("\\", "/")
+                    image_url = f"/uploads/{rel_path}"
+                else:
+                    # Just use the filename if path is not relative to uploads
+                    image_url = f"/uploads/{Path(image_url).name}" if Path(image_url).name else image_url
+            except Exception:
+                # Fallback: use filename
+                image_url = f"/uploads/{Path(image_url).name}" if Path(image_url).name else image_url
+        
+        items_data.append({
+            "id": item.id,
+            "card": {
+                "id": item.id,
+                "name": item.card_name,
+                "set": {
+                    "id": item.set_code or "unknown",
+                    "name": item.set_code or "Unknown Set",
+                    "code": item.set_code or ""
+                },
+                "image_url": image_url
+            },
+            "quantity": item.quantity,
+            "condition": item.condition,
+            "condition_grade": item.condition_grade,
+            "current_value": {
+                "amount": item.current_value or 0,
+                "currency": "USD",
+                "confidence": "medium"  # Default confidence level
+            } if item.current_value else None,
+            "scanned_at": item.scanned_at.isoformat(),
+            "metadata_json": item.metadata_json  # Include parsed metadata
+        })
+    
     return {
         "success": True,
         "data": {
-            "items": [{
-                "id": item.id,
-                "card": {
-                    "id": item.id,
-                    "name": item.card_name,
-                    "set": {"code": item.set_code},
-                    "image_url": item.scan_image_url or ""
-                },
-                "quantity": item.quantity,
-                "condition": item.condition,
-                "current_value": {"amount": item.current_value or 0, "currency": "USD"} if item.current_value else None,
-                "scanned_at": item.scanned_at.isoformat()
-            } for item in items],
+            "items": items_data,
             "pagination": {
                 "page": page,
                 "limit": limit,
@@ -510,31 +733,16 @@ async def save_scan_to_inventory(
             detail=f"Card limit reached. Your {tier_info['name']} plan allows {tier_info['max_cards']} cards. You currently have {current_card_count} cards. Please upgrade to add more."
         )
     
-    import json
     results = json.loads(scan.results)
     detected_cards = results.get("detected_cards", [])
     
-    saved_count = 0
-    inventory_entries = []
-    
-    for card_data in detected_cards:
-        if card_data.get("id") in card_ids:
-            # Check limit before each save
-            if current_card_count + saved_count >= tier_info["max_cards"]:
-                break
-            
-            entry = InventoryEntry(
-                user_id=current_user.id,
-                card_name=card_data.get("name", ""),
-                set_code=card_data.get("set_code", ""),
-                quantity=1,
-                condition="Near Mint",  # Default
-                current_value=0.0,  # Default, will be updated later
-                scan_image_url=scan.image_url
-            )
-            db.add(entry)
-            inventory_entries.append(entry)
-            saved_count += 1
+    # Use the helper function to save cards
+    saved_count, inventory_entries = save_detected_cards_to_inventory(
+        [card for card in detected_cards if card.get("id") in card_ids],
+        scan,
+        current_user,
+        db
+    )
     
     db.commit()
     

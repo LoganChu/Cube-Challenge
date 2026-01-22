@@ -34,53 +34,148 @@ client = genai.Client(
     api_key=GEMINI_API_KEY
 )
 
+def extract_value(field_obj, default=None):
+    """
+    Extract the 'value' field from a confidence-annotated object.
+    
+    Args:
+        field_obj: Either a dict with 'value' key, or a direct value
+        default: Default value to return if extraction fails
+    
+    Returns:
+        The extracted value or the default
+    """
+    if isinstance(field_obj, dict):
+        return field_obj.get("value", default)
+    elif field_obj is not None:
+        # If it's already a plain value, return it
+        return field_obj
+    else:
+        return default
+
 def parse_card_response(gemini_response: str, scan_type: str) -> list:
     """
     Parse Gemini AI response to extract card information.
-    Expected format: JSON array of cards with name, set_code, confidence
+    Handles both structured format (with cardIdentity, physicalCondition, etc.) and simple format.
     """
     detected_cards = []
     
     try:
         # Try to extract JSON from the response
-        # Look for JSON array pattern
-        json_match = re.search(r'\[.*\]', gemini_response, re.DOTALL)
+        # Look for JSON array or object pattern
+        json_match = re.search(r'(\[.*\]|\{.*\})', gemini_response, re.DOTALL)
         if json_match:
-            cards_data = json.loads(json_match.group())
-            for i, card_data in enumerate(cards_data):
-                detected_cards.append({
-                    "id": str(uuid.uuid4()),
-                    "name": card_data.get("name", "Unknown Card"),
-                    "set_code": card_data.get("set_code", ""),
-                    "confidence": float(card_data.get("confidence", 0.8)),
-                    "bounding_box": card_data.get("bounding_box", {
-                        "x": 0.1 + (i * 0.3) if scan_type == "multi" else 0.1,
-                        "y": 0.2,
-                        "width": 0.25 if scan_type == "multi" else 0.8,
-                        "height": 0.4 if scan_type == "multi" else 0.8
-                    }),
-                })
+            parsed_data = json.loads(json_match.group())
+            
+            # Both formats return an array, so check if it's a list first
+            if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                container = parsed_data[0]
+                
+                if scan_type == "single":
+                    # Single card format: array with one object containing cardIdentity, physicalCondition, etc.
+                    card_identity = container.get("cardIdentity", {})
+                    physical_condition = container.get("physicalCondition", {})
+                    interpretation = container.get("interpretation", {})
+                    
+                    name = extract_value(card_identity.get("name", {}), "Unknown Card")
+                    set_code = extract_value(card_identity.get("set", {}), "")
+                    card_number = extract_value(card_identity.get("cardNumber", {}), "")
+                    year = extract_value(card_identity.get("year", {}), None)
+                    domain = extract_value(card_identity.get("domain", {}), "other")
+                    
+                    centering = extract_value(physical_condition.get("centering", {}), 0.0)
+                    corners = extract_value(physical_condition.get("corners", {}), 0.0)
+                    surface = extract_value(physical_condition.get("surface", {}), 0.0)
+                    estimated_grade = extract_value(interpretation.get("estimatedGrade", {}), 0.0)
+                    
+                    detected_cards.append({
+                        "id": str(uuid.uuid4()),
+                        "name": name if name else "Unknown Card",
+                        "set_code": set_code if set_code else "",
+                        "card_number": card_number,
+                        "year": year,
+                        "domain": domain,
+                        "confidence": 0.8,  # Default confidence
+                        "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8},
+                        "condition": {
+                            "centering": centering,
+                            "corners": corners,
+                            "surface": surface,
+                            "estimated_grade": estimated_grade
+                        }
+                    })
+                    
+                else:  # scan_type == "multi"
+                    # Multi-card format: array with object containing "cards" array
+                    cards_array = container.get("cards", [])
+                    
+                    for i, card_obj in enumerate(cards_array):
+                        card_identity = card_obj.get("cardIdentity", {})
+                        bounding_box_data = card_obj.get("boundingBox", {})
+                        physical_condition = card_obj.get("physicalCondition", {})
+                        interpretation = card_obj.get("interpretation", {})
+                        
+                        name = extract_value(card_identity.get("name", {}), "Unknown Card")
+                        set_code = extract_value(card_identity.get("set", {}), "")
+                        card_number = extract_value(card_identity.get("cardNumber", {}), "")
+                        year = extract_value(card_identity.get("year", {}), None)
+                        domain = extract_value(card_identity.get("domain", {}), "other")
+                        
+                        # Extract bounding box
+                        bbox_value = extract_value(bounding_box_data, [0.1 + (i * 0.3), 0.2, 0.25, 0.4])
+                        if isinstance(bbox_value, list) and len(bbox_value) >= 4:
+                            bbox = {"x": bbox_value[0], "y": bbox_value[1], "width": bbox_value[2], "height": bbox_value[3]}
+                        else:
+                            bbox = {"x": 0.1 + (i * 0.3), "y": 0.2, "width": 0.25, "height": 0.4}
+                        
+                        centering = extract_value(physical_condition.get("centering", {}), 0.0)
+                        corners = extract_value(physical_condition.get("corners", {}), 0.0)
+                        surface = extract_value(physical_condition.get("surface", {}), 0.0)
+                        estimated_grade = extract_value(interpretation.get("estimatedGrade", {}), 0.0)
+                        
+                        detected_cards.append({
+                            "id": str(uuid.uuid4()),
+                            "name": name if name else "Unknown Card",
+                            "set_code": set_code if set_code else "",
+                            "card_number": card_number,
+                            "year": year,
+                            "domain": domain,
+                            "confidence": 0.8,
+                            "bounding_box": bbox,
+                            "condition": {
+                                "centering": centering,
+                                "corners": corners,
+                                "surface": surface,
+                                "estimated_grade": estimated_grade
+                            }
+                        })
+            else:
+                # Fallback: try to extract card names from text
+                # Look for patterns like "Card Name (SET_CODE)"
+                card_pattern = r'([A-Za-z0-9\s,\'\-\.]+)\s*\(([A-Z0-9]+)\)'
+                matches = re.findall(card_pattern, gemini_response)
+                for i, (name, set_code) in enumerate(matches[:5]):  # Limit to 5 cards
+                    detected_cards.append({
+                        "id": str(uuid.uuid4()),
+                        "name": name.strip(),
+                        "set_code": set_code.strip(),
+                        "confidence": 0.85 - (i * 0.05),
+                        "bounding_box": {
+                            "x": 0.1 + (i * 0.3) if scan_type == "multi" else 0.1,
+                            "y": 0.2,
+                            "width": 0.25 if scan_type == "multi" else 0.8,
+                            "height": 0.4 if scan_type == "multi" else 0.8
+                        },
+                    })
         else:
-            # Fallback: try to extract card names from text
-            # Look for patterns like "Card Name (SET_CODE)"
-            card_pattern = r'([A-Za-z0-9\s,\'\-\.]+)\s*\(([A-Z0-9]+)\)'
-            matches = re.findall(card_pattern, gemini_response)
-            for i, (name, set_code) in enumerate(matches[:5]):  # Limit to 5 cards
-                detected_cards.append({
-                    "id": str(uuid.uuid4()),
-                    "name": name.strip(),
-                    "set_code": set_code.strip(),
-                    "confidence": 0.85 - (i * 0.05),
-                    "bounding_box": {
-                        "x": 0.1 + (i * 0.3) if scan_type == "multi" else 0.1,
-                        "y": 0.2,
-                        "width": 0.25 if scan_type == "multi" else 0.8,
-                        "height": 0.4 if scan_type == "multi" else 0.8
-                    },
-                })
+            # No JSON found, create placeholder
+            pass
+            
     except Exception as e:
         print(f"Error parsing Gemini response: {e}")
         print(f"Response was: {gemini_response}")
+        import traceback
+        print(traceback.format_exc())
     
     # If no cards detected, return at least one placeholder
     if not detected_cards:
