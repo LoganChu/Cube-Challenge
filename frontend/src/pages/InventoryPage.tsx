@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Grid, List, ChevronDown } from 'lucide-react';
+import { Search, Grid, List, Trash2 } from 'lucide-react';
 
 interface InventoryEntry {
   id: string;
@@ -61,6 +61,25 @@ export default function InventoryPage() {
       console.error('Error fetching inventory:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const removeEntry = async (entryId: string) => {
+    if (!window.confirm('Remove this card from your inventory?')) return;
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/v1/inventory/${entryId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Failed to remove inventory entry');
+      await fetchInventory();
+    } catch (error) {
+      console.error('Error removing inventory entry:', error);
+      alert('Unable to remove that card. Please try again.');
     }
   };
 
@@ -144,7 +163,7 @@ export default function InventoryPage() {
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {entries.map((entry) => (
-              <CardGridItem key={entry.id} entry={entry} />
+              <CardGridItem key={entry.id} entry={entry} onRemove={removeEntry} />
             ))}
           </div>
         ) : (
@@ -166,6 +185,9 @@ export default function InventoryPage() {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Value
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -196,6 +218,18 @@ export default function InventoryPage() {
                         ? `$${(entry.current_value.amount * entry.quantity).toFixed(2)}`
                         : 'N/A'}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeEntry(entry.id);
+                        }}
+                        className="inline-flex items-center gap-2 text-sm text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Remove
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -207,14 +241,22 @@ export default function InventoryPage() {
   );
 }
 
-function CardGridItem({ entry }: { entry: InventoryEntry }) {
+function CardGridItem({ entry, onRemove }: { entry: InventoryEntry; onRemove: (entryId: string) => void }) {
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
+    <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow relative">
       <img
         src={entry.card.image_url}
         alt={entry.card.name}
         className="w-full h-48 object-contain bg-gray-50"
       />
+      <button
+        type="button"
+        onClick={() => onRemove(entry.id)}
+        className="absolute top-2 right-2 bg-white/90 text-red-600 hover:text-red-700 shadow px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1"
+      >
+        <Trash2 className="w-3 h-3" />
+        Remove
+      </button>
       <div className="p-4">
         <h3 className="font-semibold text-gray-900 mb-1 truncate">{entry.card.name}</h3>
         <p className="text-sm text-gray-600 mb-2">{entry.card.set.code}</p>

@@ -17,6 +17,7 @@ import bcrypt
 import uuid
 import os
 import json
+import re
 from pathlib import Path
 import httpx
 
@@ -216,6 +217,63 @@ def save_detected_cards_to_inventory(
     
     db.commit()
     return saved_count, inventory_entries
+
+
+def parse_multi_cards_from_raw_response(raw_response: str) -> list:
+    if not raw_response:
+        return []
+
+    try:
+        json_match = re.search(r'(\{.*\}|\[.*\])', raw_response, re.DOTALL)
+        if not json_match:
+            return []
+
+        parsed_data = json.loads(json_match.group(1))
+        if isinstance(parsed_data, list):
+            container = parsed_data[0] if parsed_data else {}
+        elif isinstance(parsed_data, dict):
+            container = parsed_data
+        else:
+            return []
+
+        cards_array = container.get("cards", [])
+        detected_cards = []
+        for index, card_obj in enumerate(cards_array):
+            card_identity = card_obj.get("cardIdentity", {})
+            bounding_box_data = card_obj.get("boundingBox", {})
+
+            name = (card_identity.get("name") or {}).get("value") or "Unknown Card"
+            set_code = (card_identity.get("set") or {}).get("value") or ""
+            card_number = (card_identity.get("cardNumber") or {}).get("value")
+            year = (card_identity.get("year") or {}).get("value")
+            domain = (card_identity.get("domain") or {}).get("value") or "other"
+
+            bbox_value = bounding_box_data.get("value") or [0.1 + (index * 0.3), 0.2, 0.25, 0.4]
+            if isinstance(bbox_value, list) and len(bbox_value) >= 4:
+                bbox = {
+                    "x": bbox_value[0],
+                    "y": bbox_value[1],
+                    "width": bbox_value[2],
+                    "height": bbox_value[3]
+                }
+            else:
+                bbox = {"x": 0.1 + (index * 0.3), "y": 0.2, "width": 0.25, "height": 0.4}
+
+            detected_cards.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "set_code": set_code,
+                "card_number": card_number,
+                "year": year,
+                "domain": domain,
+                "confidence": 0.8,
+                "bounding_box": bbox
+            })
+
+        return detected_cards
+    except Exception as error:
+        print(f"Error parsing raw_response for multi cards: {error}")
+        return []
 
 
 
@@ -516,6 +574,15 @@ async def upload_scan(
                     results = response.json()
                     print(f"ML service results: {results}")
                     detected_cards = results.get("detected_cards", [])
+
+                    if scan_type == "multi":
+                        raw_response = results.get("raw_response")
+                        parsed_cards = parse_multi_cards_from_raw_response(raw_response)
+                        if parsed_cards:
+                            detected_cards = parsed_cards
+                            results["detected_cards"] = parsed_cards
+                            results["total_cards"] = len(parsed_cards)
+
                     print(f"Detected cards count: {len(detected_cards)}")
                     
                     # Store results as JSON
@@ -707,6 +774,23 @@ async def get_inventory(
             }
         }
     }
+
+@app.delete("/api/v1/inventory/{entry_id}")
+async def delete_inventory_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    entry = db.query(InventoryEntry).filter(
+        InventoryEntry.id == entry_id,
+        InventoryEntry.user_id == current_user.id
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Inventory entry not found")
+
+    db.delete(entry)
+    db.commit()
+    return {"success": True}
 
 @app.post("/api/v1/scans/{scan_id}/save")
 async def save_scan_to_inventory(
