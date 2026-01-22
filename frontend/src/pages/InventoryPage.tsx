@@ -19,6 +19,12 @@ interface InventoryEntry {
   scanned_at: string;
 }
 
+const resolveImageUrl = (apiUrl: string, imageUrl: string) => {
+  if (!imageUrl) return imageUrl;
+  if (imageUrl.startsWith('http')) return imageUrl;
+  return `${apiUrl}${imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`}`;
+};
+
 export default function InventoryPage() {
   const [entries, setEntries] = useState<InventoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +41,8 @@ export default function InventoryPage() {
     fetchInventory();
   }, [filters, searchQuery]);
 
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
   const fetchInventory = async () => {
     setLoading(true);
     try {
@@ -46,7 +54,6 @@ export default function InventoryPage() {
         ...(filters.condition && { condition: filters.condition }),
       });
 
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/api/v1/inventory?${params}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -67,7 +74,6 @@ export default function InventoryPage() {
   const removeEntry = async (entryId: string) => {
     if (!window.confirm('Remove this card from your inventory?')) return;
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/api/v1/inventory/${entryId}`, {
         method: 'DELETE',
         headers: {
@@ -163,7 +169,7 @@ export default function InventoryPage() {
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {entries.map((entry) => (
-              <CardGridItem key={entry.id} entry={entry} onRemove={removeEntry} />
+              <CardGridItem key={entry.id} entry={entry} onRemove={removeEntry} apiUrl={apiUrl} />
             ))}
           </div>
         ) : (
@@ -197,7 +203,7 @@ export default function InventoryPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <img
-                          src={entry.card.image_url}
+                          src={resolveImageUrl(apiUrl, entry.card.image_url)}
                           alt={entry.card.name}
                           className="w-12 h-16 object-contain mr-3"
                         />
@@ -241,11 +247,19 @@ export default function InventoryPage() {
   );
 }
 
-function CardGridItem({ entry, onRemove }: { entry: InventoryEntry; onRemove: (entryId: string) => void }) {
+function CardGridItem({
+  entry,
+  onRemove,
+  apiUrl
+}: {
+  entry: InventoryEntry;
+  onRemove: (entryId: string) => void;
+  apiUrl: string;
+}) {
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow relative">
       <img
-        src={entry.card.image_url}
+        src={resolveImageUrl(apiUrl, entry.card.image_url)}
         alt={entry.card.name}
         className="w-full h-48 object-contain bg-gray-50"
       />

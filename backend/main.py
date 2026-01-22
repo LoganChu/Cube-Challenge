@@ -124,6 +124,29 @@ def crop_card_image(original_image_path: str, bounding_box: dict, card_id: str) 
         print(f"Error cropping image: {e}")
         return None
 
+
+def attach_cropped_images_to_detected_cards(
+    detected_cards: list,
+    scan_image_path: Optional[str]
+) -> list:
+    if not scan_image_path:
+        return detected_cards
+
+    for card in detected_cards:
+        if card.get("crop_image_url"):
+            continue
+        bounding_box = card.get("bounding_box")
+        if not bounding_box:
+            continue
+        card_id = card.get("id") or str(uuid.uuid4())
+        if not card.get("id"):
+            card["id"] = card_id
+        cropped_path = crop_card_image(scan_image_path, bounding_box, card_id)
+        if cropped_path:
+            card["crop_image_url"] = cropped_path
+
+    return detected_cards
+
 def save_detected_cards_to_inventory(
     detected_cards: list,
     scan: Scan,
@@ -582,6 +605,13 @@ async def upload_scan(
                             detected_cards = parsed_cards
                             results["detected_cards"] = parsed_cards
                             results["total_cards"] = len(parsed_cards)
+
+                    detected_cards = attach_cropped_images_to_detected_cards(
+                        detected_cards,
+                        scan.image_url
+                    )
+                    results["detected_cards"] = detected_cards
+                    results["total_cards"] = len(detected_cards)
 
                     print(f"Detected cards count: {len(detected_cards)}")
                     

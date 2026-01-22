@@ -46,12 +46,50 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const placeholderStats: DashboardStats = {
+    total_cards: 124,
+    total_value: 4823.5,
+    value_change: 214.32,
+    value_change_percent: 4.6,
+    recent_scans: 6,
+    active_listings: 8,
+    pending_trades: 3,
+    unread_alerts: 5
+  };
+
+  const placeholderActivity: MarketplaceActivity[] = [
+    {
+      id: 'placeholder-1',
+      type: 'listing',
+      title: 'Listed Charizard EX (Secret Rare) for $245',
+      status: 'Live • 12 watchers',
+      date: '2h ago'
+    },
+    {
+      id: 'placeholder-2',
+      type: 'offer',
+      title: 'Offer received for Blastoise EX (LP)',
+      status: 'Pending response',
+      date: 'Yesterday'
+    },
+    {
+      id: 'placeholder-3',
+      type: 'trade',
+      title: 'Trade chat opened with MintVault',
+      status: 'Awaiting confirmation',
+      date: '2 days ago'
+    }
+  ];
+
   const placeholderTrends = [
-    [12, 14, 13, 17, 16, 19, 21, 20, 23],
-    [8, 9, 12, 11, 10, 13, 12, 15, 14],
-    [5, 6, 7, 9, 8, 11, 13, 12, 14],
-    [20, 19, 18, 20, 22, 21, 23, 24, 26],
-    [7, 8, 9, 10, 12, 11, 13, 15, 14]
+    {
+      values: [18.2, 18.9, 19.4, 20.1, 19.8, 20.6, 21.4, 22.1],
+      label: '7D'
+    },
+    {
+      values: [11.6, 11.4, 11.2, 11.9, 12.4, 12.1, 12.9, 13.3],
+      label: '7D'
+    }
   ];
 
   const buildSparklinePoints = (values: number[]) => {
@@ -66,6 +104,8 @@ export default function DashboardPage() {
       })
       .join(' ');
   };
+
+  const formatCurrency = (value: number) => `$${value.toFixed(2)}`;
 
   useEffect(() => {
     fetchDashboardData();
@@ -116,6 +156,9 @@ export default function DashboardPage() {
     }
   };
 
+  const displayStats = stats || placeholderStats;
+  const displayActivity = marketplaceActivity.length ? marketplaceActivity : placeholderActivity;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -140,7 +183,7 @@ export default function DashboardPage() {
             <div>
               <p className="text-sm text-gray-600">Total Cards</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">
-                {stats?.total_cards || 0}
+                {displayStats.total_cards}
               </p>
             </div>
             <div className="bg-blue-100 p-3 rounded-lg">
@@ -162,20 +205,20 @@ export default function DashboardPage() {
             <div>
               <p className="text-sm text-gray-600">Portfolio Value</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">
-                ${(stats?.total_value || 0).toFixed(2)}
+                ${displayStats.total_value.toFixed(2)}
               </p>
-              {stats && stats.value_change !== 0 && (
+              {displayStats.value_change !== 0 && (
                 <div className={`flex items-center gap-1 mt-2 text-sm ${
-                  stats.value_change > 0 ? 'text-green-600' : 'text-red-600'
+                  displayStats.value_change > 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  {stats.value_change > 0 ? (
+                  {displayStats.value_change > 0 ? (
                     <TrendingUp className="w-4 h-4" />
                   ) : (
                     <TrendingDown className="w-4 h-4" />
                   )}
                   <span>
-                    {stats.value_change > 0 ? '+' : ''}
-                    {stats.value_change_percent.toFixed(1)}%
+                    {displayStats.value_change > 0 ? '+' : ''}
+                    {displayStats.value_change_percent.toFixed(1)}%
                   </span>
                 </div>
               )}
@@ -199,7 +242,7 @@ export default function DashboardPage() {
             <div>
               <p className="text-sm text-gray-600">Active Listings</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">
-                {stats?.active_listings || 0}
+                {displayStats.active_listings}
               </p>
             </div>
             <div className="bg-purple-100 p-3 rounded-lg">
@@ -221,7 +264,7 @@ export default function DashboardPage() {
             <div>
               <p className="text-sm text-gray-600">Unread Alerts</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">
-                {stats?.unread_alerts || 0}
+                {displayStats.unread_alerts}
               </p>
             </div>
             <div className="bg-yellow-100 p-3 rounded-lg">
@@ -255,41 +298,60 @@ export default function DashboardPage() {
             <p className="text-gray-500 text-center py-8">No cards in inventory yet</p>
           ) : (
             <div className="space-y-4">
-              {trendingCards.map((card) => (
-                <div key={card.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="min-w-0">
-                    <p className="font-medium text-gray-900">{card.card_name}</p>
-                    <p className="text-sm text-gray-600">{card.set_code}</p>
-                    <div className="mt-2 h-6">
-                      <svg viewBox="0 0 100 24" className="w-28 h-6">
+              {trendingCards.slice(0, 2).map((card, index) => {
+                const trend = placeholderTrends[index % placeholderTrends.length];
+                const values = trend.values;
+                const start = values[0];
+                const end = values[values.length - 1];
+                const delta = end - start;
+                const deltaPercent = (delta / start) * 100;
+                return (
+                  <div key={card.id} className="p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{card.card_name}</p>
+                        <p className="text-sm text-gray-600">{card.set_code || 'Unknown set'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-semibold text-gray-900">{formatCurrency(end)}</p>
+                        <div className={`flex items-center gap-1 text-sm ${
+                          delta >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {delta >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          <span>{delta >= 0 ? '+' : ''}{deltaPercent.toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <span>{formatCurrency(start)}</span>
+                        <span>{trend.label}</span>
+                        <span>{formatCurrency(end)}</span>
+                      </div>
+                      <svg viewBox="0 0 100 40" className="w-full h-16 mt-2">
+                        <defs>
+                          <linearGradient id={`trend-${index}`} x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor={delta >= 0 ? '#16A34A' : '#DC2626'} stopOpacity="0.25" />
+                            <stop offset="100%" stopColor={delta >= 0 ? '#16A34A' : '#DC2626'} stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
                         <polyline
-                          points={buildSparklinePoints(
-                            placeholderTrends[trendingCards.indexOf(card) % placeholderTrends.length]
-                          )}
+                          points={buildSparklinePoints(values)}
                           fill="none"
-                          stroke="#3B82F6"
-                          strokeWidth="2"
+                          stroke={delta >= 0 ? '#16A34A' : '#DC2626'}
+                          strokeWidth="2.5"
                           strokeLinecap="round"
                           strokeLinejoin="round"
+                        />
+                        <polygon
+                          points={`0,40 ${buildSparklinePoints(values)} 100,40`}
+                          fill={`url(#trend-${index})`}
                         />
                       </svg>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">${card.current_value.toFixed(2)}</p>
-                    <div className={`flex items-center gap-1 text-sm ${
-                      card.value_change > 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {card.value_change > 0 ? (
-                        <TrendingUp className="w-3 h-3" />
-                      ) : (
-                        <TrendingDown className="w-3 h-3" />
-                      )}
-                      <span>{card.value_change_percent > 0 ? '+' : ''}{card.value_change_percent}%</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -305,7 +367,7 @@ export default function DashboardPage() {
               View all
             </button>
           </div>
-          {marketplaceActivity.length === 0 ? (
+          {displayActivity.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-gray-500 mb-4">No recent marketplace activity</p>
               <button
@@ -317,7 +379,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {marketplaceActivity.map((activity) => (
+              {displayActivity.map((activity) => (
                 <div key={activity.id} className="p-3 bg-gray-50 rounded-lg">
                   <p className="font-medium text-gray-900">{activity.title}</p>
                   <p className="text-sm text-gray-600">{activity.type} • {activity.status}</p>

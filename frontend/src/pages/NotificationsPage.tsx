@@ -16,6 +16,49 @@ export default function NotificationsPage() {
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const placeholderNotifications: Notification[] = [
+    {
+      id: 'placeholder-1',
+      type: 'trend',
+      title: 'Portfolio spike detected',
+      message: 'Charizard EX jumped 12.4% in the last 24 hours.',
+      read: false,
+      created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString()
+    },
+    {
+      id: 'placeholder-2',
+      type: 'price_up',
+      title: 'Price rising reminder',
+      message: 'Blastoise EX is up 6.2% this week. Consider listing or trading.',
+      read: false,
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString()
+    },
+    {
+      id: 'placeholder-3',
+      type: 'price_down',
+      title: 'Price dip alert',
+      message: 'Venusaur EX fell 4.7% since yesterday. Watch for buying opportunities.',
+      read: false,
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 8).toISOString()
+    },
+    {
+      id: 'placeholder-4',
+      type: 'match',
+      title: 'New marketplace match',
+      message: 'MintVault has a card on your want list: Blastoise EX (LP).',
+      read: false,
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString()
+    },
+    {
+      id: 'placeholder-5',
+      type: 'listing',
+      title: 'Listing watch update',
+      message: 'Your Venusaur EX listing picked up 3 new watchers.',
+      read: true,
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString()
+    }
+  ];
+
   async function fetchNotifications() {
     setLoading(true);
     try {
@@ -61,7 +104,7 @@ export default function NotificationsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {items.map((n) => (
+            {(items.length ? items : placeholderNotifications).map((n) => (
               <div key={n.id} className={`border rounded-lg p-4 ${n.read ? 'border-gray-200 bg-white' : 'border-blue-200 bg-blue-50'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
