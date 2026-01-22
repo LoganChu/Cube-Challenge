@@ -343,7 +343,7 @@ async def upload_scan(
                     f"{ML_SERVICE_URL}/predict",
                     files=files,
                     data={"scan_type": scan_type},
-                    timeout=30.0
+                    timeout=60.0
                 )
                 
                 print(f"ML service response status: {response.status_code}")

@@ -121,10 +121,35 @@ async def predict(
             prompt = """Analyze this image of a trading card. Identify the card and extract the following information in JSON format:
 [
   {
-    "name": "Full card name",
-    "set_code": "Set abbreviation (e.g., M21, ELD, etc.)",
-    "confidence": 0.95
+  "imageMeta": {
+    "filename": { "value": "STRING", "confidence": 1.0, "source": "detected" },
+    "captureTimestamp": { "value": "ISO8601_STRING", "confidence": 1.0, "source": "detected" },
+    "imageQuality": { "value": 0.0, "confidence": 1.0, "source": "detected" }
+  },
+
+  "cardIdentity": {
+    "name": { "value": "STRING", "confidence": 0.0, "source": "detected|inferred" },
+    "set": { "value": "STRING|null", "confidence": 0.0, "source": "detected|inferred" },
+    "cardNumber": { "value": "STRING|null", "confidence": 0.0, "source": "detected|inferred" },
+    "year": { "value": "INTEGER|null", "confidence": 0.0, "source": "detected|inferred" },
+    "domain": { "value": "enum(pokemon,mtg,sports,yugioh,other)", "confidence": 0.0, "source": "detected|inferred" }
+  },
+
+  "physicalCondition": {
+    "centering": { "value": 0.0, "confidence": 0.0, "source": "detected" },
+    "corners": { "value": 0.0, "confidence": 0.0, "source": "detected" },
+    "surface": { "value": 0.0, "confidence": 0.0, "source": "detected" }
+  },
+
+  "interpretation": {
+    "estimatedGrade": { "value": 0.0, "scale": "1-10", "confidence": 0.0, "source": "computed" }
+  },
+
+  "meta": {
+    "modelVersion": { "value": "STRING", "confidence": 1.0, "source": "system" },
+    "processingTimestamp": { "value": "ISO8601_STRING", "confidence": 1.0, "source": "system" }
   }
+}
 ]
 
 If you cannot identify the card, return an empty array []. Only return valid JSON, no additional text."""
@@ -132,11 +157,36 @@ If you cannot identify the card, return an empty array []. Only return valid JSO
             prompt = """Analyze this image containing multiple trading cards. Identify all visible cards and extract the following information in JSON format:
 [
   {
-    "name": "Full card name",
-    "set_code": "Set abbreviation (e.g., M21, ELD, etc.)",
-    "confidence": 0.95,
-    "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.3, "height": 0.4}
+  "imageMeta": {
+    "filename": { "value": "STRING", "confidence": 1.0, "source": "detected" },
+    "captureTimestamp": { "value": "ISO8601_STRING", "confidence": 1.0, "source": "detected" },
+    "imageQuality": { "value": 0.0, "confidence": 1.0, "source": "detected" }
   },
+
+  "cards": [
+    {
+      "boundingBox": {
+        "value": [x, y, width, height],
+        "confidence": 0.0,
+        "source": "detected"
+      },
+
+      "cardIdentity": {
+        "name": { "value": "STRING", "confidence": 0.0, "source": "detected|inferred" },
+        "set": { "value": "STRING|null", "confidence": 0.0, "source": "detected|inferred" },
+        "cardNumber": { "value": "STRING|null", "confidence": 0.0, "source": "detected|inferred" },
+        "year": { "value": "INTEGER|null", "confidence": 0.0, "source": "detected|inferred" },
+        "domain": { "value": "enum(pokemon,mtg,sports,yugioh,other)", "confidence": 0.0, "source": "detected|inferred" }
+      },
+    }
+  ], ...
+
+  "meta": {
+    "modelVersion": { "value": "STRING", "confidence": 1.0, "source": "system" },
+    "processingTimestamp": { "value": "ISO8601_STRING", "confidence": 1.0, "source": "system" }
+  }
+}
+
   ...
 ]
 
