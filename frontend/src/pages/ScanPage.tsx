@@ -160,15 +160,8 @@ export default function ScanPage() {
           setIsProcessing(false);
           clearInterval(interval);
 
-          // Automatically save all detected cards to inventory
-          if (detectedCards.length > 0) {
-            console.log('Auto-saving to inventory...');
-            setTimeout(() => {
-              autoSaveToInventory(result.scan_id, detectedCards);
-            }, 500); // Small delay to ensure state is updated
-          } else {
-            console.log('No cards to save');
-          }
+          // Backend auto-saves on scan completion; avoid double-saving here.
+
         } else if (result.status === 'failed') {
           console.error('Scan failed');
           setError('Scan failed');
@@ -206,39 +199,6 @@ export default function ScanPage() {
 
     // Card edits are saved locally until final save
     // No need to call API for individual card edits
-  };
-
-  const autoSaveToInventory = async (scanId: string, cards: DetectedCard[]) => {
-    try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-      
-      const response = await fetch(`${apiUrl}/api/v1/scans/${scanId}/save`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          card_ids: cards.map((card) => card.id),
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || errorData.error?.message || 'Failed to save to inventory');
-      }
-
-      // Update scan result to show success
-      setScanResult((prev) => {
-        if (prev && prev.scanId === scanId) {
-          return { ...prev, status: 'saved' };
-        }
-        return prev;
-      });
-    } catch (err) {
-      console.error('Auto-save error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to automatically save to inventory');
-    }
   };
 
   const handleSaveToInventory = async () => {
