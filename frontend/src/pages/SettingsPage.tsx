@@ -19,15 +19,39 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const res = await fetch(`${apiUrl}/api/v1/settings`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      setSettings(json.data);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    async function loadSettings() {
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${apiUrl}/api/v1/settings`, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ detail: 'Failed to load settings' }));
+          console.error('Settings API error:', res.status, errorData);
+          return;
+        }
+        
+        const json = await res.json();
+        if (json.success && json.data) {
+          setSettings(json.data);
+        } else {
+          console.error('Invalid response format:', json);
+        }
+      } catch (err) {
+        console.error('Settings load error:', err);
+      }
+    }
+    
+    loadSettings();
+  }, [apiUrl, token]);
 
   async function save() {
     if (!settings) return;

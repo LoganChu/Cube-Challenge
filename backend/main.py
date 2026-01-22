@@ -41,7 +41,7 @@ JWT_ALGORITHM = "HS256"
 security = HTTPBearer()
 
 # ML Service URL
-ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://localhost:8001")
+ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://cube-challenge-ml-service-1:8001")
 
 # Database Models
 class User(Base):
@@ -291,7 +291,6 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
         }
     }
 
-# Scan Endpoints
 @app.post("/api/v1/scans/upload")
 async def upload_scan(
     image: UploadFile = File(...),
@@ -299,14 +298,24 @@ async def upload_scan(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    print(f"=== SCAN UPLOAD STARTED ===")
+    print(f"User: {current_user.username} ({current_user.id})")
+    print(f"Scan type: {scan_type}")
+    print(f"Image filename: {image.filename}")
+    print(f"Image content type: {image.content_type}")
+    
     # Save uploaded file
     upload_dir = Path("uploads")
     upload_dir.mkdir(exist_ok=True)
     
     file_path = upload_dir / f"{uuid.uuid4()}_{image.filename}"
+    print(f"Saving image to: {file_path}")
+    
     with open(file_path, "wb") as f:
         content = await image.read()
         f.write(content)
+    
+    print(f"Image saved successfully. File size: {len(content)} bytes")
     
     # Create scan record
     scan = Scan(
@@ -319,11 +328,17 @@ async def upload_scan(
     db.commit()
     db.refresh(scan)
     
+    print(f"Scan record created with ID: {scan.id}")
+    
     # Call ML service (async)
     try:
+        print(f"Calling ML service at: {ML_SERVICE_URL}/predict")
+        
         async with httpx.AsyncClient() as client:
             with open(file_path, "rb") as f:
                 files = {"image": (image.filename, f, image.content_type)}
+                
+                print(f"Sending request to ML service...")
                 response = await client.post(
                     f"{ML_SERVICE_URL}/predict",
                     files=files,
@@ -331,17 +346,52 @@ async def upload_scan(
                     timeout=30.0
                 )
                 
+                print(f"ML service response status: {response.status_code}")
+                print(f"ML service response headers: {response.headers}")
+                
                 if response.status_code == 200:
                     results = response.json()
+                    print(f"ML service results: {results}")
+                    print(f"Detected cards count: {len(results.get('detected_cards', []))}")
+                    
                     scan.results = str(results)
                     scan.status = "completed"
+                    print(f"Scan marked as completed")
                 else:
+                    print(f"ML service returned non-200 status: {response.status_code}")
+                    print(f"Response body: {response.text}")
                     scan.status = "failed"
+                    scan.results = f"ML service error: {response.status_code} - {response.text}"
+                    
+    except httpx.ConnectError as e:
+        print(f"!!! CONNECTION ERROR to ML service !!!")
+        print(f"Error: {e}")
+        print(f"ML_SERVICE_URL is set to: {ML_SERVICE_URL}")
+        print(f"Make sure ML service container is running and accessible")
+        scan.status = "failed"
+        scan.results = f"Connection error: {str(e)}"
+        
+    except httpx.TimeoutException as e:
+        print(f"!!! TIMEOUT ERROR from ML service !!!")
+        print(f"Error: {e}")
+        scan.status = "failed"
+        scan.results = f"Timeout error: {str(e)}"
+        
     except Exception as e:
+        print(f"!!! UNEXPECTED ERROR !!!")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         scan.status = "failed"
         scan.results = str(e)
     
     db.commit()
+    
+    print(f"=== SCAN UPLOAD FINISHED ===")
+    print(f"Final status: {scan.status}")
+    print(f"Scan ID: {scan.id}")
+    print()
     
     return {
         "success": True,

@@ -194,7 +194,7 @@ export default function MarketplacePage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-600">No matches yet. Try a broader card name.</p>
+                    <p className="text-sm text-gray-600">No matches yet. </p>
                   )}
                 </div>
               </div>

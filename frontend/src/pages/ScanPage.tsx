@@ -15,7 +15,7 @@ interface DetectedCard {
 
 interface ScanResult {
   scanId: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'saved';
   scanType: 'single' | 'multi';
   imageUrl: string;
   detectedCards: DetectedCard[];
@@ -53,6 +53,7 @@ export default function ScanPage() {
   const handleUpload = useCallback(async () => {
     if (!uploadedImage) return;
 
+    console.log('=== Starting upload ===');
     setIsProcessing(true);
     setError(null);
 
@@ -62,6 +63,9 @@ export default function ScanPage() {
       formData.append('scan_type', scanType);
 
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      console.log('API URL:', apiUrl);
+      console.log('Uploading to:', `${apiUrl}/api/v1/scans/upload`);
+      
       const response = await fetch(`${apiUrl}/api/v1/scans/upload`, {
         method: 'POST',
         headers: {
@@ -70,24 +74,34 @@ export default function ScanPage() {
         body: formData,
       });
 
+      console.log('Upload response status:', response.status);
+      console.log('Upload response ok:', response.ok);
+
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('Upload error data:', errorData);
         throw new Error(errorData.error?.message || 'Upload failed');
       }
 
       const data = await response.json();
+      console.log('Upload response data:', data);
       const scanId = data.data.scan_id;
+      console.log('Scan ID:', scanId);
+      console.log('Initial status:', data.data.status);
+      
       setScanResult({
         scanId: scanId,
-        status: data.data.status,
+        status: data.data.status || 'processing',
         scanType: scanType,
         imageUrl: data.data.image_url,
         detectedCards: []
       });
+      console.log('Set scan result with status:', data.data.status || 'processing');
       
       // Poll for completion
       pollScanStatus(scanId);
     } catch (err) {
+      console.error('Upload catch error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
       setIsProcessing(false);
     }
@@ -97,55 +111,82 @@ export default function ScanPage() {
     const maxAttempts = 60; // 60 attempts = 30 seconds (500ms interval)
     let attempts = 0;
 
+    console.log('=== Starting to poll scan status for ID:', scanId, '===');
+
     const interval = setInterval(async () => {
       try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/v1/scans/${scanId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      });
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+        console.log(`Poll attempt ${attempts + 1}/${maxAttempts}`);
+        
+        const response = await fetch(`${apiUrl}/api/v1/scans/${scanId}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
 
         if (!response.ok) {
+          console.error('Poll response not ok:', response.status);
           throw new Error('Failed to fetch scan status');
         }
 
         const data = await response.json();
         const result = data.data;
+        console.log('Poll response status:', result.status);
+        console.log('Detected cards count:', result.detected_cards?.length || 0);
 
         if (result.status === 'completed') {
+          console.log('=== Scan completed ===');
+          const detectedCards = (result.detected_cards || []).map((card: any) => ({
+            id: card.id,
+            boundingBox: card.bounding_box || { x: 0, y: 0, width: 1, height: 1 },
+            cropImageUrl: card.crop_image_url || result.image_url,
+            predictedSet: { id: '', name: '', code: card.set_code || '' },
+            predictedName: card.name || '',
+            predictedConfidence: card.confidence || 0,
+            confirmed: true, // Auto-confirm all cards
+            condition: 'Near Mint', // Default condition
+            quantity: 1
+          }));
+
+          console.log('Mapped detected cards:', detectedCards);
+
           setScanResult({
             scanId: result.scan_id,
             status: result.status,
             scanType: result.scan_type,
             imageUrl: result.image_url,
-            detectedCards: (result.detected_cards || []).map((card: any) => ({
-              id: card.id,
-              boundingBox: card.bounding_box || { x: 0, y: 0, width: 1, height: 1 },
-              cropImageUrl: card.crop_image_url || result.image_url,
-              predictedSet: { id: '', name: '', code: card.set_code || '' },
-              predictedName: card.name || '',
-              predictedConfidence: card.confidence || 0,
-              confirmed: false,
-              condition: '',
-              quantity: 1
-            }))
+            detectedCards: detectedCards
           });
           setIsProcessing(false);
           clearInterval(interval);
+
+          // Automatically save all detected cards to inventory
+          if (detectedCards.length > 0) {
+            console.log('Auto-saving to inventory...');
+            setTimeout(() => {
+              autoSaveToInventory(result.scan_id, detectedCards);
+            }, 500); // Small delay to ensure state is updated
+          } else {
+            console.log('No cards to save');
+          }
         } else if (result.status === 'failed') {
+          console.error('Scan failed');
           setError('Scan failed');
           setIsProcessing(false);
           clearInterval(interval);
+        } else {
+          console.log('Still processing...');
         }
 
         attempts++;
         if (attempts >= maxAttempts) {
+          console.error('Scan timeout reached');
           setError('Scan timeout - please try again');
           setIsProcessing(false);
           clearInterval(interval);
         }
       } catch (err) {
+        console.error('Poll error:', err);
         setError(err instanceof Error ? err.message : 'Polling failed');
         setIsProcessing(false);
         clearInterval(interval);
@@ -165,6 +206,39 @@ export default function ScanPage() {
 
     // Card edits are saved locally until final save
     // No need to call API for individual card edits
+  };
+
+  const autoSaveToInventory = async (scanId: string, cards: DetectedCard[]) => {
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      
+      const response = await fetch(`${apiUrl}/api/v1/scans/${scanId}/save`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          card_ids: cards.map((card) => card.id),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || errorData.error?.message || 'Failed to save to inventory');
+      }
+
+      // Update scan result to show success
+      setScanResult((prev) => {
+        if (prev && prev.scanId === scanId) {
+          return { ...prev, status: 'saved' };
+        }
+        return prev;
+      });
+    } catch (err) {
+      console.error('Auto-save error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to automatically save to inventory');
+    }
   };
 
   const handleSaveToInventory = async () => {
@@ -192,7 +266,7 @@ export default function ScanPage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Failed to save to inventory');
+        throw new Error(errorData.detail || errorData.error?.message || 'Failed to save to inventory');
       }
 
       // Navigate to inventory or show success message
@@ -237,7 +311,7 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Upload Section */}
+        {/* Upload Section - Only show when no scan result */}
         {!scanResult && (
           <div className="bg-white rounded-lg shadow-md p-8 mb-6">
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
@@ -253,7 +327,7 @@ export default function ScanPage() {
                       setImagePreview(null);
                       setUploadedImage(null);
                     }}
-                    className="text-red-600 hover:text-red-700 flex items-center justify-center gap-2"
+                    className="text-red-600 hover:text-red-700 flex items-center justify-center gap-2 mx-auto"
                   >
                     <X className="w-4 h-4" />
                     Remove Image
@@ -313,65 +387,119 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Scan Results */}
-        {scanResult && scanResult.status === 'completed' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">
-                Detected Cards ({scanResult.detectedCards.length})
-              </h2>
-
-              {scanResult.detectedCards.length === 0 ? (
-                <p className="text-gray-600">No cards detected. Please try again.</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {scanResult.detectedCards.map((card) => (
-                    <CardEditor
-                      key={card.id}
-                      card={card}
-                      onUpdate={(updates) => handleCardEdit(card.id, updates)}
-                    />
-                  ))}
+        {/* Processing Status - Show image with overlay */}
+        {scanResult && scanResult.status === 'processing' && imagePreview && (
+          <div className="bg-white rounded-lg shadow-md p-8 mb-6">
+            <div className="relative">
+              <img
+                src={imagePreview}
+                alt="Processing"
+                className="max-w-full max-h-96 mx-auto rounded-lg"
+              />
+              <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+                <div className="bg-white rounded-lg p-6 flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-gray-700 font-medium">Processing scan...</p>
+                  <p className="text-sm text-gray-500">Analyzing cards with AI</p>
                 </div>
-              )}
-            </div>
-
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setScanResult(null);
-                  setImagePreview(null);
-                  setUploadedImage(null);
-                  setError(null);
-                }}
-                className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-              >
-                Scan Another
-              </button>
-              <button
-                onClick={handleSaveToInventory}
-                disabled={
-                  scanResult.detectedCards.filter((c) => c.confirmed).length === 0
-                }
-                className="flex-1 bg-green-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-              >
-                <CheckCircle className="w-5 h-5" />
-                Save to Inventory
-              </button>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Processing Status */}
-        {scanResult && scanResult.status === 'processing' && (
-          <div className="bg-white rounded-lg shadow-md p-8 text-center">
-            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-gray-700">Processing your scan...</p>
-            <p className="text-sm text-gray-500 mt-2">
-              This may take a few seconds
-            </p>
+        {/* Scan Results - Show success message after auto-save */}
+        {scanResult && (scanResult.status === 'completed' || scanResult.status === 'saved') && (
+          <div className="space-y-6">
+            {scanResult.detectedCards.length > 0 ? (
+              <>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                    <h2 className="text-xl font-semibold text-green-900">
+                      Successfully Added {scanResult.detectedCards.length} Card{scanResult.detectedCards.length !== 1 ? 's' : ''} to Inventory!
+                    </h2>
+                  </div>
+                  <p className="text-green-700">
+                    All detected cards have been automatically saved to your inventory.
+                  </p>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Detected Cards ({scanResult.detectedCards.length})
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {scanResult.detectedCards.map((card) => (
+                      <div key={card.id} className="border border-gray-200 rounded-lg p-4">
+                        <img
+                          src={card.cropImageUrl}
+                          alt="Detected card"
+                          className="w-full h-48 object-contain bg-gray-50 rounded-lg mb-3"
+                        />
+                        <div className="space-y-2">
+                          <p className="font-semibold text-gray-900">{card.predictedName || 'Unknown Card'}</p>
+                          <p className="text-sm text-gray-600">Set: {card.predictedSet?.code || 'N/A'}</p>
+                          {card.predictedConfidence && (
+                            <p className="text-xs text-gray-500">
+                              Confidence: {(card.predictedConfidence * 100).toFixed(1)}%
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => {
+                      setScanResult(null);
+                      setImagePreview(null);
+                      setUploadedImage(null);
+                      setError(null);
+                    }}
+                    className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                  >
+                    Scan Another
+                  </button>
+                  <button
+                    onClick={() => {
+                      window.location.href = '/inventory';
+                    }}
+                    className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    View Inventory
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                <div className="flex items-center gap-3 mb-2">
+                  <AlertCircle className="w-6 h-6 text-yellow-600" />
+                  <h2 className="text-xl font-semibold text-yellow-900">
+                    No Cards Detected
+                  </h2>
+                </div>
+                <p className="text-yellow-700 mb-4">
+                  We couldn't detect any cards in this image. Please try again with a clearer photo.
+                </p>
+                <button
+                  onClick={() => {
+                    setScanResult(null);
+                    setImagePreview(null);
+                    setUploadedImage(null);
+                    setError(null);
+                  }}
+                  className="bg-blue-600 text-white py-2 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
           </div>
         )}
+
       </div>
     </div>
   );

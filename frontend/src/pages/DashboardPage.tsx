@@ -292,38 +292,7 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <button
-            onClick={() => navigate('/scan')}
-            className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
-          >
-            <Plus className="w-6 h-6 text-gray-400 mb-2" />
-            <p className="font-medium text-gray-900">Scan Cards</p>
-            <p className="text-sm text-gray-600">Add new cards to your collection</p>
-          </button>
-          <button
-            onClick={() => navigate('/marketplace')}
-            className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
-          >
-            <ShoppingCart className="w-6 h-6 text-gray-400 mb-2" />
-            <p className="font-medium text-gray-900">Browse Marketplace</p>
-            <p className="text-sm text-gray-600">Find cards to buy or trade</p>
-          </button>
-          <button
-            onClick={() => navigate('/agent')}
-            className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
-          >
-            <Bell className="w-6 h-6 text-gray-400 mb-2" />
-            <p className="font-medium text-gray-900">View Alerts</p>
-            <p className="text-sm text-gray-600">Check price alerts and suggestions</p>
-          </button>
-        </div>
-      </div>
+      </div>      
     </div>
   );
 }

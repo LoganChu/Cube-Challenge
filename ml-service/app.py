@@ -1,14 +1,17 @@
 """
 CardVault ML Service
-Mock ML service for MVP (can be replaced with actual models)
+Uses Google's Gemini AI for card detection and identification
 """
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
 import json
-from typing import List
 import os
 from pathlib import Path
+from PIL import Image
+from google import genai
+from google.genai.types import HttpOptions
+import re
 
 app = FastAPI(title="CardVault ML Service")
 
@@ -20,12 +23,76 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mock card database (in production, use actual model)
-MOCK_CARDS = {
-    "lightning bolt": {"name": "Lightning Bolt", "set_code": "M21", "confidence": 0.95},
-    "counterspell": {"name": "Counterspell", "set_code": "M21", "confidence": 0.92},
-    "oko": {"name": "Oko, Thief of Crowns", "set_code": "ELD", "confidence": 0.90},
-}
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is required. Set it in your environment or docker-compose.yml")
+
+client = genai.Client(
+    http_options=HttpOptions(api_version="v1"),
+    api_key=GEMINI_API_KEY
+)
+
+def parse_card_response(gemini_response: str, scan_type: str) -> list:
+    """
+    Parse Gemini AI response to extract card information.
+    Expected format: JSON array of cards with name, set_code, confidence
+    """
+    detected_cards = []
+    
+    try:
+        # Try to extract JSON from the response
+        # Look for JSON array pattern
+        json_match = re.search(r'\[.*\]', gemini_response, re.DOTALL)
+        if json_match:
+            cards_data = json.loads(json_match.group())
+            for i, card_data in enumerate(cards_data):
+                detected_cards.append({
+                    "id": str(uuid.uuid4()),
+                    "name": card_data.get("name", "Unknown Card"),
+                    "set_code": card_data.get("set_code", ""),
+                    "confidence": float(card_data.get("confidence", 0.8)),
+                    "bounding_box": card_data.get("bounding_box", {
+                        "x": 0.1 + (i * 0.3) if scan_type == "multi" else 0.1,
+                        "y": 0.2,
+                        "width": 0.25 if scan_type == "multi" else 0.8,
+                        "height": 0.4 if scan_type == "multi" else 0.8
+                    }),
+                })
+        else:
+            # Fallback: try to extract card names from text
+            # Look for patterns like "Card Name (SET_CODE)"
+            card_pattern = r'([A-Za-z0-9\s,\'\-\.]+)\s*\(([A-Z0-9]+)\)'
+            matches = re.findall(card_pattern, gemini_response)
+            for i, (name, set_code) in enumerate(matches[:5]):  # Limit to 5 cards
+                detected_cards.append({
+                    "id": str(uuid.uuid4()),
+                    "name": name.strip(),
+                    "set_code": set_code.strip(),
+                    "confidence": 0.85 - (i * 0.05),
+                    "bounding_box": {
+                        "x": 0.1 + (i * 0.3) if scan_type == "multi" else 0.1,
+                        "y": 0.2,
+                        "width": 0.25 if scan_type == "multi" else 0.8,
+                        "height": 0.4 if scan_type == "multi" else 0.8
+                    },
+                })
+    except Exception as e:
+        print(f"Error parsing Gemini response: {e}")
+        print(f"Response was: {gemini_response}")
+    
+    # If no cards detected, return at least one placeholder
+    if not detected_cards:
+        detected_cards.append({
+            "id": str(uuid.uuid4()),
+            "name": "Unknown Card",
+            "set_code": "",
+            "confidence": 0.5,
+            "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8},
+        })
+    
+    return detected_cards
 
 @app.post("/predict")
 async def predict(
@@ -33,8 +100,7 @@ async def predict(
     scan_type: str = Form("single")
 ):
     """
-    Mock ML prediction endpoint
-    In production, this would use actual YOLOv8 + EfficientNet models
+    Use Google Gemini AI to detect and identify trading cards in the image
     """
     
     # Save uploaded image
@@ -46,44 +112,65 @@ async def predict(
         content = await image.read()
         f.write(content)
     
-    # Mock detection (in production, use YOLOv8)
-    detected_cards = []
-    
-    if scan_type == "single":
-        # Mock single card detection
-        card = MOCK_CARDS.get("lightning bolt")  # Default mock
-        detected_cards.append({
-            "id": str(uuid.uuid4()),
-            "name": card["name"],
-            "set_code": card["set_code"],
-            "confidence": card["confidence"],
-            "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8},
-            "crop_image_url": str(file_path)
-        })
-    else:
-        # Mock multi-card detection (2-3 cards)
-        cards_to_detect = ["lightning bolt", "counterspell", "oko"][:3]
-        for i, card_key in enumerate(cards_to_detect):
-            card = MOCK_CARDS.get(card_key, MOCK_CARDS["lightning bolt"])
-            detected_cards.append({
-                "id": str(uuid.uuid4()),
-                "name": card["name"],
-                "set_code": card["set_code"],
-                "confidence": card["confidence"] - (i * 0.02),
-                "bounding_box": {
-                    "x": 0.1 + (i * 0.3),
-                    "y": 0.2,
-                    "width": 0.25,
-                    "height": 0.4
-                },
-                "crop_image_url": str(file_path)
-            })
-    
-    return {
-        "success": True,
-        "detected_cards": detected_cards,
-        "total_cards": len(detected_cards)
-    }
+    try:
+        # Load image with PIL
+        img = Image.open(file_path)
+        
+        # Create prompt based on scan type
+        if scan_type == "single":
+            prompt = """Analyze this image of a trading card. Identify the card and extract the following information in JSON format:
+[
+  {
+    "name": "Full card name",
+    "set_code": "Set abbreviation (e.g., M21, ELD, etc.)",
+    "confidence": 0.95
+  }
+]
+
+If you cannot identify the card, return an empty array []. Only return valid JSON, no additional text."""
+        else:
+            prompt = """Analyze this image containing multiple trading cards. Identify all visible cards and extract the following information in JSON format:
+[
+  {
+    "name": "Full card name",
+    "set_code": "Set abbreviation (e.g., M21, ELD, etc.)",
+    "confidence": 0.95,
+    "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.3, "height": 0.4}
+  },
+  ...
+]
+
+For each card, provide approximate bounding box coordinates (0.0 to 1.0) indicating where the card appears in the image.
+If you cannot identify any cards, return an empty array []. Only return valid JSON, no additional text."""
+        
+        # Call Gemini API using the new client API
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",  # or "gemini-1.5-pro" for better accuracy
+            contents=[img, prompt]
+        )
+        
+        # Parse response
+        gemini_text = resp.text if hasattr(resp, 'text') else str(resp)
+        detected_cards = parse_card_response(gemini_text, scan_type)
+
+        print(gemini_text)
+        
+        return {
+            "success": True,
+            "detected_cards": detected_cards,
+            "total_cards": len(detected_cards),
+            "raw_response": gemini_text  # For debugging
+        }
+        
+    except Exception as e:
+        print(f"Error processing image with Gemini: {e}")
+        # Fallback: return empty result
+        return {
+            "success": False,
+            "detected_cards": [],
+            "total_cards": 0,
+            "error": str(e)
+        }
 
 @app.get("/health")
 async def health():

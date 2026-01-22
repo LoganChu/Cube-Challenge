@@ -10,7 +10,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:///./cardvault.db
       - JWT_SECRET=dev-secret-key-change-in-production
-      - ML_SERVICE_URL=http://ml-service:8001
+      - ML_SERVICE_URL=http://ml-service:8001  # ✅ Changed this
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
@@ -24,6 +24,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION}
+      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI}
     volumes:
       - ./ml-service:/app
       - ./uploads:/app/uploads
