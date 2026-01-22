@@ -34,6 +34,18 @@ export default function MarketplacePage() {
   const [cardName, setCardName] = useState('');
   const [setCode, setSetCode] = useState('');
 
+  const placeholderInquiries = useMemo(() => {
+    const sampleUsers = ['CardKing', 'HoloHunter', 'TopLoader', 'MintVault', 'SleevedUp'];
+    return wants.map((want, index) => ({
+      id: want.id,
+      card_name: want.card_name,
+      set_code: want.set_code,
+      suggested_user: sampleUsers[index % sampleUsers.length],
+      match_confidence: `${82 + (index % 10)}% match`,
+      note: 'Placeholder suggestion based on recent activity',
+    }));
+  }, [wants]);
+
   const groupedMatches = useMemo(() => {
     const byWant: Record<string, Match[]> = {};
     for (const m of matches) {
@@ -196,6 +208,44 @@ export default function MarketplacePage() {
                   ) : (
                     <p className="text-sm text-gray-600">No matches yet. </p>
                   )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-gray-900">Marketplace Inquiries</h2>
+          <span className="text-xs text-gray-500">Placeholder</span>
+        </div>
+        {placeholderInquiries.length === 0 ? (
+          <div className="text-center py-8 text-gray-600">
+            Add a want to see suggested collectors to contact.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {placeholderInquiries.map((inquiry) => (
+              <div key={inquiry.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      {inquiry.card_name}
+                      {inquiry.set_code ? <span className="text-gray-500"> ({inquiry.set_code})</span> : null}
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1">Suggested contact: {inquiry.suggested_user}</p>
+                    <p className="text-xs text-gray-500 mt-1">{inquiry.match_confidence} • {inquiry.note}</p>
+                  </div>
+                  <button
+                    className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 flex items-center gap-2 text-sm"
+                    onClick={() => {
+                      alert(`Contact ${inquiry.suggested_user} (placeholder) about ${inquiry.card_name}.`);
+                    }}
+                  >
+                    <User className="w-4 h-4" />
+                    Reach out
+                  </button>
                 </div>
               </div>
             ))}

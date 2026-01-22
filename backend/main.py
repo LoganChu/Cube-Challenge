@@ -682,7 +682,7 @@ async def get_scan(scan_id: str, current_user: User = Depends(get_current_user),
 @app.get("/api/v1/inventory")
 async def get_inventory(
     page: int = 1,
-    limit: int = 50,
+    limit: Optional[int] = None,
     search: Optional[str] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
@@ -706,7 +706,14 @@ async def get_inventory(
         query = query.order_by(InventoryEntry.scanned_at.desc())
 
     total = query.count()
-    items = query.offset((page - 1) * limit).limit(limit).all()
+    if limit is None or limit <= 0:
+        items = query.all()
+        limit_value = total
+        total_pages = 1 if total else 0
+    else:
+        items = query.offset((page - 1) * limit).limit(limit).all()
+        limit_value = limit
+        total_pages = (total + limit - 1) // limit
     
     # Parse metadata for each item
     items_data = []
@@ -768,9 +775,9 @@ async def get_inventory(
             "items": items_data,
             "pagination": {
                 "page": page,
-                "limit": limit,
+                "limit": limit_value,
                 "total": total,
-                "total_pages": (total + limit - 1) // limit
+                "total_pages": total_pages
             }
         }
     }

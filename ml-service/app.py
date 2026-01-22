@@ -186,7 +186,8 @@ def parse_card_response(gemini_response: str, scan_type: str) -> list:
             "confidence": 0.5,
             "bounding_box": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8},
         })
-    
+    print(f"=== DETECTED CARDS ===")
+    print(detected_cards)
     return detected_cards
 
 @app.post("/predict")

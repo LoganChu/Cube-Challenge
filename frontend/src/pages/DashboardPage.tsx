@@ -46,6 +46,27 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const placeholderTrends = [
+    [12, 14, 13, 17, 16, 19, 21, 20, 23],
+    [8, 9, 12, 11, 10, 13, 12, 15, 14],
+    [5, 6, 7, 9, 8, 11, 13, 12, 14],
+    [20, 19, 18, 20, 22, 21, 23, 24, 26],
+    [7, 8, 9, 10, 12, 11, 13, 15, 14]
+  ];
+
+  const buildSparklinePoints = (values: number[]) => {
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const range = max - min || 1;
+    return values
+      .map((value, index) => {
+        const x = (index / (values.length - 1)) * 100;
+        const y = 24 - ((value - min) / range) * 24;
+        return `${x},${y}`;
+      })
+      .join(' ');
+  };
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -236,9 +257,23 @@ export default function DashboardPage() {
             <div className="space-y-4">
               {trendingCards.map((card) => (
                 <div key={card.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-medium text-gray-900">{card.card_name}</p>
                     <p className="text-sm text-gray-600">{card.set_code}</p>
+                    <div className="mt-2 h-6">
+                      <svg viewBox="0 0 100 24" className="w-28 h-6">
+                        <polyline
+                          points={buildSparklinePoints(
+                            placeholderTrends[trendingCards.indexOf(card) % placeholderTrends.length]
+                          )}
+                          fill="none"
+                          stroke="#3B82F6"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-gray-900">${card.current_value.toFixed(2)}</p>
