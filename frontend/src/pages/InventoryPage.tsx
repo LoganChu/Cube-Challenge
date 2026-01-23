@@ -180,12 +180,6 @@ export default function InventoryPage() {
                     Card
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Set
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Condition
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Quantity
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -209,19 +203,13 @@ export default function InventoryPage() {
                         <span className="font-medium text-gray-900">{entry.card.name}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {entry.card.set.code}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {entry.condition}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {entry.quantity}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {entry.current_value
                         ? `$${(entry.current_value.amount * entry.quantity).toFixed(2)}`
-                        : 'N/A'}
+                        : ''}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <button
@@ -272,15 +260,13 @@ function CardGridItem({
       </button>
       <div className="p-4">
         <h3 className="font-semibold text-gray-900 mb-1 truncate">{entry.card.name}</h3>
-        <p className="text-sm text-gray-600 mb-2">{entry.card.set.code}</p>
-        <div className="flex justify-between items-center text-sm">
-          <span className="text-gray-600">{entry.condition}</span>
-          <span className="font-medium text-gray-900">
-            {entry.current_value
-              ? `$${(entry.current_value.amount * entry.quantity).toFixed(2)}`
-              : 'N/A'}
-          </span>
-        </div>
+        {entry.current_value && (
+          <div className="flex justify-between items-center text-sm">
+            <span className="font-medium text-gray-900">
+              {`$${(entry.current_value.amount * entry.quantity).toFixed(2)}`}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
